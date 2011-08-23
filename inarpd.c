@@ -20,6 +20,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <getopt.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -102,6 +103,15 @@ static int verbose = 0;
 static int ifnum = 0;
 static char **iflist = NULL;
 
+static inline void print_dbg(int level, const char *fmt, ...)
+{
+	if (verbose > level) {
+		va_list ap;
+		va_start(ap, fmt);
+		vprintf(fmt, ap);
+		va_end(ap);
+	}
+}
 
 void print_ip(int family, unsigned char *ip)
 {
@@ -189,8 +199,7 @@ void parse_link(struct ifinfomsg *msg, int msglen)
 	int i;
 
 	if (!dev) {
-		if (verbose > 0)
-			printf("Device #%u already exists\n", msg->ifi_index);
+		print_dbg(0, "Device #%u already exists\n", msg->ifi_index);
 		return;
 	}
 	
@@ -267,14 +276,12 @@ void parse_addr(struct ifaddrmsg *msg, int msglen)
 	int i, len;
 
 	if (!dev) {
-		if (verbose > 0)
-			printf("Device #%u has no link-level description\n",
-			       msg->ifa_index);
+		print_dbg(0, "Device #%u has no link-level description\n",
+				msg->ifa_index);
 		return;
 	}
 
-	if (verbose > 2)
-		printf("family %u prefixlen %u\n", msg->ifa_family,
+	print_dbg(2, "family %u prefixlen %u\n", msg->ifa_family,
 		       msg->ifa_prefixlen);
 
 	while (msglen > 0) {
@@ -316,13 +323,11 @@ void parse_addr(struct ifaddrmsg *msg, int msglen)
 	}
 
 	if (!addr && peer) {
-		if (verbose > 0)
-			printf("Device %s has an IP peer with no local"
+		print_dbg(0, "Device %s has an IP peer with no local"
 			       " IP address\n", dev->name);
 	}
 	if (addr && !peer) {
-		if (verbose > 0)
-			printf("Device %s has a local IP address with no"
+		print_dbg(0, "Device %s has a local IP address with no"
 			       "IP destination submask\n", dev->name);
 	}
 	if (!addr)
@@ -357,8 +362,7 @@ void read_ifaces(void)
                 struct rtgenmsg g;
         }req;
 
-	if (verbose > 0)
-		printf("Searching for network interfaces...\n");
+	print_dbg(0, "Searching for network interfaces...\n");
 
         sock = socket(PF_NETLINK, SOCK_RAW, NETLINK_ROUTE);
         if (sock < 0) {
@@ -400,8 +404,7 @@ void read_ifaces(void)
 				break;
 			}
 
-			if (verbose > 2)
-				printf("NLMSG 0x%X\n", h->nlmsg_type);
+			print_dbg(2, "NLMSG 0x%X\n", h->nlmsg_type);
 
 			if (h->nlmsg_type == RTM_NEWLINK)
 				parse_link(NLMSG_DATA(h), IFLA_PAYLOAD(h));
@@ -485,8 +488,7 @@ void send_requests(int sock)
 	do {
 		if (!dev->active)
 			continue;
-		if (verbose > 1)
-			printf("Sending request on %s\n", dev->name);
+		print_dbg(1, "Sending request on %s\n", dev->name);
 		for (i = 0; i < dev->ip_cnt; i++)
 			send_inarp(sock, dev, dev->ip[i].family,
 				   ARPOP_InREQUEST, &dev->addr, &dev->bcast,
@@ -509,9 +511,8 @@ void add_route(device *dev, int family, unsigned char *ip)
 		}
 
 	if (i == MAX_ADDRESSES) {
-		if (verbose > 1)
-			printf("Too many peer IP addresses on device %s\n",
-			       dev->name);
+		print_dbg(1, "Too many peer IP addresses on device %s\n",
+				dev->name);
 		return;
 	}
 
@@ -560,9 +561,8 @@ void inbound_inarp(int sock, device *dev, arp_packet *buffer, int len)
 	int addr_len, i;
 
 	if (!dev->active) {
-		if (verbose > 2)
-			printf("received packet on inactive device %s\n",
-			       dev->name);
+		print_dbg(2, "received packet on inactive device %s\n",
+				dev->name);
 		return;
 	}
 
@@ -578,29 +578,25 @@ void inbound_inarp(int sock, device *dev, arp_packet *buffer, int len)
 	buffer->op = ntohs(buffer->op);
 
 	if (buffer->op != ARPOP_InREQUEST && buffer->op != ARPOP_InREPLY) {
-		if (verbose > 2)
-			printf("ignoring packet type 0x%X on %s\n",
-			       buffer->op, dev->name);
+		print_dbg(2, "ignoring packet type 0x%X on %s\n",
+				buffer->op, dev->name);
 		return;
 	}
 
 	if (buffer->hrd != dev->type) {
-		if (verbose > 1)
-			printf("wrong hw type 0x%X in packet on %s\n",
-			       buffer->hrd, dev->name);
+		print_dbg(1, "wrong hw type 0x%X in packet on %s\n",
+				buffer->hrd, dev->name);
 		return;
 	}
 
 	if (buffer->hln != dev->addr_len) {
-		if (verbose > 1)
-			printf("wrong hw address length %u in packet on %s\n",
-			       buffer->hln, dev->name);
+		print_dbg(1, "wrong hw address length %u in packet on %s\n",
+				buffer->hln, dev->name);
 		return;
 	}
 
 	if (len < 8 + 2 * (buffer->hln + buffer->pln)) {
-		if (verbose > 1)
-			printf("packet is too short on %s\n", dev->name);
+		print_dbg(1, "packet is too short on %s\n", dev->name);
 		return;
 	}
 
@@ -612,9 +608,8 @@ void inbound_inarp(int sock, device *dev, arp_packet *buffer, int len)
 		sha = dev->bcast;
 
 	if (buffer->pro != ETH_P_IP && buffer->pro != ETH_P_IPV6) {
-		if (verbose > 2)
-			printf("unknown protocol 0x%X in packet on %s\n",
-			       buffer->pro, dev->name);
+		print_dbg(2, "unknown protocol 0x%X in packet on %s\n",
+				buffer->pro, dev->name);
 		return;
 	}
 
@@ -622,9 +617,8 @@ void inbound_inarp(int sock, device *dev, arp_packet *buffer, int len)
 	addr_len = (buffer->pro == ETH_P_IP ? IP_ADDR_LEN : IP6_ADDR_LEN);
 
 	if (buffer->pln != addr_len) {
-		if (verbose > 1)
-			printf("invalid protocol length in packet on %s\n",
-			       dev->name);
+		print_dbg(1, "invalid protocol length in packet on %s\n",
+				dev->name);
 		return;
 	}
 
@@ -651,8 +645,7 @@ void inbound_inarp(int sock, device *dev, arp_packet *buffer, int len)
 			   dev->addr, sha, dev->ip[i].addr, spa);
 		return;
 	}
-	if (verbose > 1)
-		printf("No valid IP address found for this request\n");
+	print_dbg(1, "No valid IP address found for this request\n");
 }
 
 #define VERSION "0.17"
