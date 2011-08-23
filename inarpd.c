@@ -19,6 +19,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <getopt.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -95,8 +96,11 @@ typedef struct device {
 }device;
 
 
-device *first = NULL;
-int verbose = 0;
+static device *first = NULL;
+static int add_rt = 0;
+static int verbose = 0;
+static int ifnum = 0;
+static char **iflist = NULL;
 
 
 void print_ip(int family, unsigned char *ip)
@@ -651,47 +655,95 @@ void inbound_inarp(int sock, device *dev, arp_packet *buffer, int len)
 		printf("No valid IP address found for this request\n");
 }
 
-static char usage[] = "inarpd version 0.17\n"
-"Copyright (C) 2003 Krzysztof Halasa <khc@pm.waw.pl>\n\n"
-"Usage: inarpd [-r] [+r] [-r] [+r] [-v] interface ...\n\n"
-"options:\n"
-"   -r       = do not add host IP route for neighbours (default)\n"
-"   +r       = add host IP route for neighbours\n"
-"   -v       = print info messages\n"
-"   -v -v    = print network packets\n"
-"   -v -v -v = print debug messages\n";
+#define VERSION "0.17"
+
+static void usage(char *prog)
+{
+	printf("inarpd version %s\n"
+			"Copyright (C) 2003 Krzysztof Halasa <khc@pm.waw.pl>\n\n"
+			"Usage: inarpd [options] [interfaces...]\n"
+			"Options:\n"
+			"   -r       = add host IP route for neighbours (default is not to add)\n"
+			"   -v       = print info messages\n"
+			"   -v -v    = print network packets\n"
+			"   -v -v -v = print debug messages\n",
+			VERSION, prog);
+}
+
+static void parse_args(int argc, char **argv)
+{
+	while (1)
+	{
+		int c;
+		/* getopt_long stores the option index here. */
+		int option_index = 0;
+		static struct option long_options[] =
+		{
+			{"add-route",		no_argument,		0, 'r'},
+			{"verbose",		no_argument,		0, 'v'},
+			{"help",		no_argument,		0, 'h'},
+			{0, 0, 0, 0}
+		};
+
+		c = getopt_long(argc, argv, "rvh", long_options, &option_index);
+
+		/* detect the end of the options. */
+		if (c == -1)
+			break;
+
+		switch (c)
+		{
+			case 'r': {
+					add_rt = 1;
+					break;
+				}
+			case 'v': {
+					verbose++;
+					break;
+				}
+			case 'h': {
+					usage(argv[0]);
+					exit(0);
+					break;
+				}
+			case '?': {
+					/* getopt_long already printed an error message. */
+					usage(argv[0]);
+					exit(1);
+					break;
+				}
+			default: {
+					exit(1);
+				}
+		}
+	}
+
+	if (argc == optind)
+		return;
+
+	ifnum = argc - optind;
+	iflist = argv + optind;
+}
 
 int main(int argc, char *argv[])
 {
-	int add_rt = 0, sock, devs = 0, ok, i;
+	int sock, devs = 0, ok, i;
 	time_t last_xmit;
 	device *dev;
 
-	for (i = 1; i < argc; i++)
-		if (!strcmp(argv[i], "-v"))
-			verbose++;
+	parse_args(argc, argv);
 
 	read_ifaces();
 
 	ok = 1;
-	while(argc > 1) {
-		if (!strcmp(argv[1], "-v"))
-			;	/* already handled */
-		else if (!strcmp(argv[1], "-r"))
-			add_rt = 0;
-		else if (!strcmp(argv[1], "+r"))
-			add_rt = 1;
-		else if (argv[1][0] == '-') {
-			error(usage);
-			exit(1);
-		} else {
-			if (add_iface(argv[1], add_rt))
-				ok = 0;
-			else
-				devs = 1;
-		}
-		argv++;
-		argc--;
+	while(ifnum > 0) {
+		if (add_iface(iflist[0], add_rt))
+			ok = 0;
+		else
+			devs = 1;
+
+		iflist++;
+		ifnum--;
 	}
 
 	if (!ok)
